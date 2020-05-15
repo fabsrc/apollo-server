@@ -67,7 +67,12 @@ export const plugin = <TContext>(
       request: { http, variables },
     }) {
       // If the options are false don't do any metrics timing.
-      if (options.traceReporting === false) return {};
+      if (options.traceReporting === false) {
+        // If we are running in gateway mode don't send the ftv1 trace
+        metrics.captureTraces = false;
+        return {};
+      }
+      metrics.captureTraces = true;
 
       const treeBuilder: EngineReportingTreeBuilder = new EngineReportingTreeBuilder(
         {
@@ -119,7 +124,12 @@ export const plugin = <TContext>(
         // Returning here if we aren't reporting the trace to make sure,
         // endDone is set and the treeBuilder has stopped
 
-        if (!reportTrace) return;
+        if (!reportTrace) {
+          // If we are running in gateway mode don't send the ftv1 trace
+          // after we have stopped trace timing.
+          metrics.captureTraces = false;
+          return;
+        }
 
         treeBuilder.trace.fullQueryCacheHit = !!metrics.responseCacheHit;
         treeBuilder.trace.forbiddenOperation = !!metrics.forbiddenOperation;
