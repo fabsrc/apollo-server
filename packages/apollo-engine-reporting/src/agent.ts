@@ -23,7 +23,7 @@ import {
   GraphQLRequestContext,
   GraphQLRequestContextDidResolveOperation,
   Logger,
-} from "apollo-server-types";
+} from 'apollo-server-types';
 import { InMemoryLRUCache } from 'apollo-server-caching';
 import { defaultEngineReportingSignature } from 'apollo-graphql';
 import { ApolloServerPlugin } from 'apollo-server-plugin-base';
@@ -59,7 +59,10 @@ export type VariableValueOptions =
   | SendValuesBaseOptions;
 
 export type TraceReportingOptions<TContext> =
-  ((request: GraphQLRequestContextDidResolveOperation<TContext>) => Promise<boolean>) | boolean;
+  | ((
+      request: GraphQLRequestContextDidResolveOperation<TContext>,
+    ) => Promise<boolean>)
+  | boolean;
 
 export type GenerateClientInfo<TContext> = (
   requestContext: GraphQLRequestContext<TContext>,
@@ -246,7 +249,7 @@ export interface EngineReportingOptions<TContext> {
    * ```
    *
    */
-  traceReporting?: TraceReportingOptions<TContext>
+  traceReporting?: TraceReportingOptions<TContext>;
   /**
    * [DEPRECATED] Use sendVariableValues
    * Passing an array into privateVariables is equivalent to passing { exceptNames: array } into
