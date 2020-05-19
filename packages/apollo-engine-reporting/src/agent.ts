@@ -4,9 +4,7 @@ import {
   DocumentNode,
   GraphQLError,
   GraphQLSchema,
-  lexicographicSortSchema,
   printSchema,
-  stripIgnoredCharacters,
 } from 'graphql';
 import {
   ReportHeader,
@@ -29,7 +27,7 @@ import { defaultEngineReportingSignature } from 'apollo-graphql';
 import { ApolloServerPlugin } from 'apollo-server-plugin-base';
 import { reportingLoop, SchemaReporter } from './schemaReporter';
 import { v4 as uuidv4 } from 'uuid';
-import { isString } from 'util';
+import { createHash } from 'crypto';
 
 let warnedOnDeprecatedApiKey = false;
 
@@ -168,7 +166,8 @@ export interface EngineReportingOptions<TContext> {
    */
   endpointUrl?: string;
   /**
-   * The URL of the Engine report ingress server. This was previously known as endpointUrl
+   * The URL to the Apollo Graph Manager ingress endpoint.
+   * (Previously, this was `endpointUrl`, which will be removed in AS3).
    */
   tracesEndpointUrl?: string;
   /**
@@ -333,7 +332,7 @@ export interface EngineReportingOptions<TContext> {
    * additional details about its runtime environment to Apollo Graph Manager.
    *
    * See [our _preview
-   * documentation](https://github.com/apollographql/apollo-schema-reporting-preview-docs)
+   * documentation_](https://github.com/apollographql/apollo-schema-reporting-preview-docs)
    * for more information.
    */
   experimental_schemaReporting?: boolean;
@@ -471,7 +470,7 @@ export class EngineReportingAgent<TContext = any> {
 
     if (this.options.endpointUrl) {
       this.logger.warn(
-        'The endpointUrl option for engine has been deprecated. Please use tracesEndpointUrl instead',
+        '[deprecated] The `endpointUrl` option within `engine` has been renamed to `tracesEndpointUrl`.',
       );
     }
     this.tracesEndpointUrl =
@@ -942,9 +941,10 @@ export function computeExecutableSchemaId(
   schema: string | GraphQLSchema,
 ): string {
   // Can't call digest on this object twice. Creating new object each function call
-  const sha256 = module.require('crypto').createHash('sha256');
-  let schemaDocument = isString(schema)
-    ? schema
-    : stripIgnoredCharacters(printSchema(lexicographicSortSchema(schema)));
+  const sha256 = createHash('sha256');
+  const schemaDocument =
+    typeof schema === 'string'
+      ? schema
+      : printSchema(schema);
   return sha256.update(schemaDocument).digest('hex');
 }

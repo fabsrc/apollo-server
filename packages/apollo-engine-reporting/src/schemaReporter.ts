@@ -1,12 +1,12 @@
 import {
   ReportServerInfoVariables,
   EdgeServerInfo,
-  AutoregReportServerInfoResult,
+  SchemaReportingServerInfoResult,
 } from './reportingOperationTypes';
 import { fetch, Headers, Request } from 'apollo-server-env';
 import { GraphQLRequest, Logger } from 'apollo-server-types';
 
-const reportServerInfoGql = `
+export const reportServerInfoGql = `
   mutation ReportServerInfo($info: EdgeServerInfo!, $executableSchema: String) {
     me {
       __typename
@@ -44,7 +44,7 @@ export function reportingLoop(
         // We can add hardcoded backoff in the future,
         // or on repeated failures stop responding reporting.
         logger.error(
-          `Error in reporting server info to Apollo Graph Manager for schema reporting: ${error}`,
+          `Error reporting server info to Apollo Graph Manager during schema reporting: ${error}`,
         );
         sendNextWithExecutableSchema = false;
         setTimeout(inner, fallbackReportingDelayInMs);
@@ -109,47 +109,49 @@ export class SchemaReporter {
       executableSchema: withExecutableSchema
         ? this.executableSchemaDocument
         : null,
-    } as ReportServerInfoVariables);
+    });
 
     if (errors) {
       throw new Error((errors || []).map((x: any) => x.message).join('\n'));
     }
 
+    function msgForUnexpectedResponse(data: any): string {
+      return [
+        'Unexpected response shape from Apollo Graph Manager when',
+        'reporting server information for schema reporting. If',
+        'this continues, please reach out to support@apollographql.com.',
+        'Received response:',
+        JSON.stringify(data),
+      ].join(' ');
+    }
+
     if (!data || !data.me || !data.me.__typename) {
-      throw new Error(`
-Heartbeat response error. Received incomplete data from Apollo Graph Manager.
-If this continues please reach out at support@apollographql.com.
-Got response: "${JSON.stringify(data)}"
-      `);
+      throw new Error(msgForUnexpectedResponse(data));
     }
 
     if (data.me.__typename === 'UserMutation') {
       this.isStopped = true;
-      throw new Error(`
-      This server was configured with an API key for a user.  Only a service's API key may be used for schema reporting.
-      Please visit the settings for this graph at https://engine.apollographql.com/ to obtain an API key for a service.
-      `);
+      throw new Error(
+        [
+          'This server was configured with an API key for a user.',
+          "Only a service's API key may be used for schema reporting.",
+          'Please visit the settings for this graph at',
+          'https://engine.apollographql.com/ to obtain an API key for a service.',
+        ].join(' '),
+      );
     } else if (data.me.__typename === 'ServiceMutation') {
       if (!data.me.reportServerInfo) {
-        throw new Error(`
-Heartbeat response error. Received incomplete data from Apollo Graph Manager.
-If this continues please reach out at support@apollographql.com.
-Got response: "${JSON.stringify(data)}"
-      `);
+        throw new Error(msgForUnexpectedResponse(data));
       }
       return data.me.reportServerInfo;
     } else {
-      throw new Error(`
-Unexpected response. Received unexpected data from Apollo Graph Manager
-If this continues please reach out at support@apollographql.com.
-Got response: "${JSON.stringify(data)}"
-      `);
+      throw new Error(msgForUnexpectedResponse(data));
     }
   }
 
   private async graphManagerQuery(
     variables: ReportServerInfoVariables,
-  ): Promise<AutoregReportServerInfoResult> {
+  ): Promise<SchemaReportingServerInfoResult> {
     const request: GraphQLRequest = {
       query: reportServerInfoGql,
       operationName: 'ReportServerInfo',
@@ -160,7 +162,29 @@ Got response: "${JSON.stringify(data)}"
       headers: this.headers,
       body: JSON.stringify(request),
     });
+
     const httpResponse = await fetch(httpRequest);
-    return httpResponse.json();
+
+    if (!httpResponse.ok) {
+      throw new Error([
+        `An unexpected HTTP status code (${httpResponse.status}) was`,
+        'encountered during schema reporting.'
+      ].join(' '));
+    }
+
+    try {
+      // JSON parsing failure due to malformed data is the likely failure case
+      // here.  Any non-JSON response (e.g. HTML) is usually the suspect.
+      return await httpResponse.json();
+    } catch (error) {
+      throw new Error(
+        [
+          "Couldn't report server info to Apollo Graph Manager.",
+          'Parsing response as JSON failed.',
+          'If this continues please reach out to support@apollographql.com',
+          error
+        ].join(' '),
+      );
+    }
   }
 }

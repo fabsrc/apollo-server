@@ -22,21 +22,26 @@ import { GraphQLOptions, Context as GraphQLContext } from 'apollo-server-core';
 import {
   ApolloServerPlugin,
   GraphQLRequestExecutionListener,
+  GraphQLRequestListener,
   GraphQLRequestListenerDidResolveField,
   GraphQLRequestListenerExecutionDidEnd,
   GraphQLRequestListenerParsingDidEnd,
   GraphQLRequestListenerValidationDidEnd,
+  GraphQLRequestContext,
 } from 'apollo-server-plugin-base';
-import { GraphQLRequestListener } from 'apollo-server-plugin-base';
 import { InMemoryLRUCache } from 'apollo-server-caching';
 import { generateSchemaHash } from "../utils/schemaHash";
+import { Logger } from "apollo-server-types";
 
 // This is a temporary kludge to ensure we preserve runQuery behavior with the
 // GraphQLRequestProcessor refactoring.
 // These tests will be rewritten as GraphQLRequestProcessor tests after the
 // refactoring is complete.
 
-function runQuery(options: QueryOptions): Promise<GraphQLResponse> {
+function runQuery(
+  options: QueryOptions,
+  requestContextExtra?: Partial<GraphQLRequestContext>,
+): Promise<GraphQLResponse> {
   const request: GraphQLRequest = {
     query: options.queryString,
     operationName: options.operationName,
@@ -56,6 +61,7 @@ function runQuery(options: QueryOptions): Promise<GraphQLResponse> {
     context: options.context || {},
     debug: options.debug,
     cache: {} as any,
+    ...requestContextExtra,
   });
 }
 
@@ -393,6 +399,88 @@ describe('runQuery', () => {
         return ['customExtension', { foo: 'bar' }];
       }
     }
+
+    describe('deprecation warnings', () => {
+      const queryString = `{ testString }`;
+      async function runWithExtAndReturnLogger(
+        extensions: QueryOptions['extensions'],
+      ): Promise<Logger> {
+        const logger = {
+          warn: jest.fn(() => {}),
+          info: console.info,
+          debug: console.debug,
+          error: console.error,
+        };
+
+        await runQuery(
+          {
+            schema,
+            queryString,
+            extensions,
+            request: new MockReq(),
+          },
+          {
+            logger,
+          },
+        );
+
+        return logger;
+      }
+
+      it('warns about named extensions', async () => {
+        const logger = await runWithExtAndReturnLogger([
+          () => new (class NamedExtension implements GraphQLExtension<any> {})(),
+        ]);
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringMatching(/^\[deprecated\] A "NamedExtension" was/));
+      });
+
+      it('warns about anonymous extensions', async () => {
+        const logger = await runWithExtAndReturnLogger([
+          () => new (class implements GraphQLExtension<any> {})(),
+        ]);
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringMatching(/^\[deprecated\] An anonymous extension was/));
+      });
+
+      it('warns about anonymous class expressions', async () => {
+        // In other words, when the name is the name of the variable.
+        const anon = class implements GraphQLExtension<any> {};
+        const logger = await runWithExtAndReturnLogger([
+          () => new anon(),
+        ]);
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringMatching(/^\[deprecated\] A "anon" was/));
+      });
+
+      it('warns for multiple extensions', async () => {
+        const logger = await runWithExtAndReturnLogger([
+          () => new (class Name1Ext implements GraphQLExtension<any> {})(),
+          () => new (class Name2Ext implements GraphQLExtension<any> {})(),
+        ]);
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringMatching(/^\[deprecated\] A "Name1Ext" was/));
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringMatching(/^\[deprecated\] A "Name2Ext" was/));
+      });
+
+      it('warns only once', async () => {
+        // Will use the same extension across two invocations.
+        class NameExt implements GraphQLExtension<any> {};
+
+        const logger1 = await runWithExtAndReturnLogger([
+          () => new NameExt,
+        ]);
+        expect(logger1.warn).toHaveBeenCalledWith(
+          expect.stringMatching(/^\[deprecated\] A "NameExt" was/));
+
+        const logger2 = await runWithExtAndReturnLogger([
+          () => new NameExt,
+        ]);
+        expect(logger2.warn).not.toHaveBeenCalledWith(
+          expect.stringMatching(/^\[deprecated\] A "NameExt" was/));
+      });
+    });
 
     it('creates the extension stack', async () => {
       const queryString = `{ testString }`;
